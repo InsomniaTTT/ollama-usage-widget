@@ -1,31 +1,41 @@
 # Ollama 用量锁屏小组件
 
-在 **iPhone 锁屏 / 主屏幕**上随时查看 [Ollama](https://ollama.com) 云端模型的用量统计：
+在 **iPhone 锁屏 / 主屏幕**上随时查看 [Ollama](https://ollama.com) 云端的用量，与官网 [Usage 面板](https://ollama.com/settings)完全同口径：
 
-- 🔢 **近 24 小时请求数**（大数字）
-- 📊 **近 7 天 / 近 30 天请求总数**
-- 📈 **近 7 天每日请求分布柱状图**（主屏中/大尺寸）
+- 📊 **会话用量百分比**（Session usage）
+- 📊 **每周用量百分比**（Weekly usage）
+- ⏳ **精确重置倒计时**（服务器返回的 `resets_at`，非本地推算）
+- 🔢 **本周各模型请求次数**（Models used this week）
+- 💵 新版月度额度账户：**余额 / 总额度**；USD 计量账户还可显示**近 7 天输入 / 输出 token 数**
 
-数据来自 [ollama.com](https://ollama.com) 官网 Dashboard 同款接口，手机直接请求官方 API，**不需要电脑常开、不需要自建服务**。
+数据来自 ollama.com 官方接口（[ollama 仓库 openapi 文档](https://github.com/ollama/ollama/blob/main/docs/openapi.yaml)所列），手机直接请求，**不需要电脑常开、不需要自建服务**。
 
-> **v2 更新（2026-10-19）**：Ollama 于 2026 年 10 月改版了用量接口——`/api/usage` 从"会话/每周额度百分比"变为"请求数时间序列"（`range=24h/7d/30d`）。本组件已适配新接口，同时修复了在 Scriptable App 内手动运行时的 TypeError 崩溃。
+> **v3 更新（2026-10-19）**：Ollama 于 2026 年 10 月改版用量接口后，本组件迁移到官方 `/api/balance` + `/api/usage` 接口：
+> - 百分比与重置时间直接来自服务器（`remaining_percent` / `resets_at`），倒计时永远精确，无需任何本地校准；
+> - 同时兼容传统计划（会话/每周限额）与新版月度额度计划；
+> - 修复在 Scriptable App 内手动运行时的 TypeError 崩溃。
 
 ## 小组件样式
 
 | 位置 | 样式 | 显示内容 |
 |---|---|---|
-| 锁屏 | 圆形 | 近 24h 请求数（大数字） |
-| 锁屏 | 矩形 | 标题 + 近24h / 近7天 / 近30天 请求数（各一行） |
-| 锁屏 | 内联（时钟上方） | `Ollama 24h 470 次 · 7天 488 次` |
-| 主屏 | 小 | 大数字（近24h）+ 近7天/近30天统计行 |
-| 主屏 | 中 / 大 | 以上全部 + 近 7 天每日分布柱状图（今天蓝色，其余灰色） |
+| 锁屏 | 圆形 | 会话已用百分比（大数字）；新版计划显示余额 |
+| 锁屏 | 矩形 | `会话 62.4% · 4小时后重置` / `本周 26.2% · 6天后重置` / 模型请求次数 |
+| 锁屏 | 内联（时钟上方） | `Ollama 会话 62% · 本周 26%` |
+| 主屏 | 小/中 | 两根「x.x% used」进度条 + 倒计时 + 请求统计 + 各模型明细（超过 90% 变红） |
+| 主屏 | 大 | 以上全部 + 近 7 天每日请求分布柱状图（今天蓝色，其余灰色） |
 
 ## 原理
 
-- 数据源：`GET https://ollama.com/api/usage?range=24h|7d|30d`，使用 [API Key](https://ollama.com/settings/keys) 以 `Authorization: Bearer` 鉴权，与 ollama.com 官网 Dashboard 同源。
-- 返回结构：`totals.request_count`（该时间窗总请求数）+ `buckets[]`（按小时/天分桶的请求数明细）。
-- 三个时间窗并行请求，单个失败不影响整体展示；网络异常时回退展示 Keychain 中最近一次成功数据（标 `·缓存`）。
-- ⚠️ Ollama 官方目前没有累计 token 数或额度百分比的公开 API；此接口属于非官方文档化的接口，Ollama 若再调整可能需要相应更新。
+两个接口均使用 [API Key](https://ollama.com/settings/keys) 以 `Authorization: Bearer` 鉴权，并行请求、互为降级（任一失败不影响其余展示），网络异常时回退 Keychain 缓存（标 `·缓存`）：
+
+| 接口 | 数据 |
+|---|---|
+| `GET /api/balance` | 传统计划：`session` / `weekly` 的 `remaining_percent` 与 `resets_at`；新版计划：`balance_usd` / `allowance_usd` / 月度周期；附加购买余额 |
+| `GET /api/usage?range=7d&group_by=model` | 近 7 天请求总数与各模型请求次数（USD 计量账户还含 `usage_usd` 与输入/输出 token 数） |
+| `GET /api/usage?range=24h` | 近 24 小时请求数 |
+
+> ⚠️ Ollama 官方没有公开的「累计 token 总量」接口；传统计划（会话/每周限额）的用量以额度百分比呈现，与官网面板一致。
 
 ## 安装
 
@@ -47,19 +57,19 @@
 ## 常见问题
 
 - **显示「获取失败」**：检查 `API_KEY` 是否有效、手机能否访问 ollama.com。
-- **App 内运行报 TypeError**：已在 v2 修复（旧版在 App 内手动运行会因 `config.widgetFamily` 未定义而崩溃，小组件环境不受影响）。
 - **显示「·缓存」**：本次网络请求失败，展示的是 Keychain 中的最近一次成功数据。
 - **多久刷新一次**：锁屏小组件由 iOS 系统调度（脚本已提示 15 分钟刷新），点亮屏幕时通常会更新；后台长驻不保证实时。
+- **百分比和官网对不上**：官网面板数据可能有分钟级延迟（官方文档也提示 "New usage may take time to appear"），以官网为准。
 - **安全性**：API Key 只保存在你自己手机的脚本里，建议专门为小组件创建一个独立 Key，随时可在 [settings/keys](https://ollama.com/settings/keys) 撤销，不影响其他工具。
 
 ## 已知限制
 
-- 依赖 ollama.com 的非公开接口 `/api/usage`，接口 2026-10 已改版过一次；若再次变化，以实际返回为准并更新脚本。
-- 网页 Usage 面板中的「会话/每周额度百分比」目前未通过 API Key 开放，本组件展示的是 Dashboard 的请求数口径。
+- `/api/balance` 与 `/api/usage` 属于 Ollama 云端较新的接口，若再次调整以实际返回为准；接口在 2026 年 10 月改版过一次，本组件 v3 已适配。
+- 锁屏矩形空间有限，只展示前两个模型的请求数；完整明细见主屏中/大样式。
 
 ## English Quickstart
 
-An iOS lock-screen widget (via the free **Scriptable** app) that shows your [ollama.com](https://ollama.com) cloud usage — request counts for the last 24 hours / 7 days / 30 days, plus a 7-day daily bar chart on the home screen — fetched directly from the same API the official Dashboard uses.
+An iOS lock-screen widget (via the free **Scriptable** app) that mirrors the [ollama.com](https://ollama.com) Usage panel — session/weekly usage percentages with exact server-provided reset countdowns, per-model request counts, and (for monthly-credit plans) your balance. Uses the official `/api/balance` + `/api/usage` endpoints with your API key.
 
 1. Install Scriptable from the App Store, create a new script, paste the contents of `OllamaUsage.js`.
 2. Create an API key at [ollama.com/settings/keys](https://ollama.com/settings/keys) and put it in the `API_KEY` constant.
