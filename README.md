@@ -1,32 +1,31 @@
 # Ollama 用量锁屏小组件
 
-在 **iPhone 锁屏 / 主屏幕**上随时查看 [Ollama](https://ollama.com) 云端模型的用量：
+在 **iPhone 锁屏 / 主屏幕**上随时查看 [Ollama](https://ollama.com) 云端模型的用量统计：
 
-- 📊 **会话用量百分比**（Session usage）
-- 📊 **每周用量百分比**（Weekly usage）
-- ⏳ **重置倒计时**（"Resets in ..."）
-- 🔢 **本周各模型请求次数**（Models used this week）
+- 🔢 **近 24 小时请求数**（大数字）
+- 📊 **近 7 天 / 近 30 天请求总数**
+- 📈 **近 7 天每日请求分布柱状图**（主屏中/大尺寸）
 
-数据来自 [ollama.com](https://ollama.com) 网页后台 **Cloud usage** 面板的同一个接口，手机直接请求官方 API，**不需要电脑常开、不需要自建服务**。
+数据来自 [ollama.com](https://ollama.com) 官网 Dashboard 同款接口，手机直接请求官方 API，**不需要电脑常开、不需要自建服务**。
+
+> **v2 更新（2026-10-19）**：Ollama 于 2026 年 10 月改版了用量接口——`/api/usage` 从"会话/每周额度百分比"变为"请求数时间序列"（`range=24h/7d/30d`）。本组件已适配新接口，同时修复了在 Scriptable App 内手动运行时的 TypeError 崩溃。
 
 ## 小组件样式
 
 | 位置 | 样式 | 显示内容 |
 |---|---|---|
-| 锁屏 | 圆形 | `34%`（本周） |
-| 锁屏 | 矩形 | 标题 + `会话 23.2% · 3小时后重置` + `本周 34.7% · 4天后重置` + 首位模型请求次数 |
-| 锁屏 | 内联（时钟上方） | `Ollama 会话 23% · 本周 35%` |
-| 主屏 | 小 | 两根进度条 + 重置倒计时 |
-| 主屏 | 中 / 大 | 进度条 + 倒计时 + 请求总数 + 各模型明细 |
-
-主屏样式与官方网页的 Cloud usage 面板一致：两根「x.x% used」进度条（超过 90% 变红）。
+| 锁屏 | 圆形 | 近 24h 请求数（大数字） |
+| 锁屏 | 矩形 | 标题 + 近24h / 近7天 / 近30天 请求数（各一行） |
+| 锁屏 | 内联（时钟上方） | `Ollama 24h 470 次 · 7天 488 次` |
+| 主屏 | 小 | 大数字（近24h）+ 近7天/近30天统计行 |
+| 主屏 | 中 / 大 | 以上全部 + 近 7 天每日分布柱状图（今天蓝色，其余灰色） |
 
 ## 原理
 
-- 数据源：`GET https://ollama.com/api/usage`，使用 [API Key](https://ollama.com/settings/keys) 以 `Authorization: Bearer` 鉴权，与 ollama.com 网页后台同源，无需额外权限。
-- 返回的 `limits.session.usage` / `limits.weekly.usage` 是 0~1 的小数，乘 100 即面板上的百分比。
-- ⚠️ Ollama 官方**没有**累计 token 数统计接口，用量按各模型 token 费率折算为额度百分比，这正是网页后台显示的口径。
-- 重置时间不在接口返回中（由 ollama.com 服务端渲染页面时计算），脚本通过两条可配置规则自行推算倒计时（见下文「校准重置时间」）。
+- 数据源：`GET https://ollama.com/api/usage?range=24h|7d|30d`，使用 [API Key](https://ollama.com/settings/keys) 以 `Authorization: Bearer` 鉴权，与 ollama.com 官网 Dashboard 同源。
+- 返回结构：`totals.request_count`（该时间窗总请求数）+ `buckets[]`（按小时/天分桶的请求数明细）。
+- 三个时间窗并行请求，单个失败不影响整体展示；网络异常时回退展示 Keychain 中最近一次成功数据（标 `·缓存`）。
+- ⚠️ Ollama 官方目前没有累计 token 数或额度百分比的公开 API；此接口属于非官方文档化的接口，Ollama 若再调整可能需要相应更新。
 
 ## 安装
 
@@ -37,46 +36,35 @@
 5. 在 Scriptable 中点 ▶ 运行一次，会弹出预览并显示真实数据，说明配置成功。
 6. 添加小组件：
    - **锁屏**：长按锁屏 → 自定 → 点时钟下方区域 → 添加小组件 → 选 **Scriptable** → 选 `OllamaUsage` 脚本，样式选圆形或矩形。
-   - **主屏**：长按桌面 → 编辑 → 左上角 + → 搜 Scriptable → 选小/中/大尺寸 → 在小组件上长按配置脚本为 `OllamaUsage`。
+   - **主屏**：长按桌面 → 编辑 → 左上角 + → 搜 Scriptable → 选小/中/大尺寸 → 长按小组件配置脚本为 `OllamaUsage`。
 
 ## 配置项
 
 | 常量 | 默认值 | 说明 |
 |---|---|---|
 | `API_KEY` | 占位符 | 你的 ollama.com API Key（[创建地址](https://ollama.com/settings/keys)） |
-| `SESSION_ANCHOR_ISO` | `2026-09-02T13:00:00Z` | 会话窗口任意一个重置边界的 UTC 时间，用于推算倒计时 |
-| `SESSION_CYCLE_HOURS` | `5` | 会话窗口时长（小时） |
-| `WEEKLY_RESET_UTC_HOUR` | `0` | 每周重置的 UTC 时刻（0 = 周一 00:00 UTC） |
-
-### 校准重置时间
-
-重置时间不在 API 中，脚本按「会话 = 固定 5 小时窗口 / 每周 = 周一 00:00 UTC」推算，这两个规则来自对 ollama.com 后台的观察，**不同账号可能存在差异**。如果发现倒计时不准：
-
-1. 登录 [ollama.com/settings](https://ollama.com/settings)，把鼠标悬停在 **"Resets in ..."** 文案上，浏览器会提示精确的重置时间（如 `Wed, Sep 2, 9:00 PM`）。
-2. 将该时间换算成 UTC，更新 `SESSION_ANCHOR_ISO`（会话）或 `WEEKLY_RESET_UTC_HOUR`（每周）即可，一分钟搞定。
 
 ## 常见问题
 
 - **显示「获取失败」**：检查 `API_KEY` 是否有效、手机能否访问 ollama.com。
+- **App 内运行报 TypeError**：已在 v2 修复（旧版在 App 内手动运行会因 `config.widgetFamily` 未定义而崩溃，小组件环境不受影响）。
 - **显示「·缓存」**：本次网络请求失败，展示的是 Keychain 中的最近一次成功数据。
 - **多久刷新一次**：锁屏小组件由 iOS 系统调度（脚本已提示 15 分钟刷新），点亮屏幕时通常会更新；后台长驻不保证实时。
 - **安全性**：API Key 只保存在你自己手机的脚本里，建议专门为小组件创建一个独立 Key，随时可在 [settings/keys](https://ollama.com/settings/keys) 撤销，不影响其他工具。
 
 ## 已知限制
 
-- 依赖 ollama.com 的用量接口 `/api/usage`，属于**非官方公开文档**的接口，Ollama 若调整接口或面板口径，本脚本可能需要相应更新。
-- 锁屏空间有限，矩形样式只展示首位模型的请求数；完整模型明细见主屏中/大样式。
+- 依赖 ollama.com 的非公开接口 `/api/usage`，接口 2026-10 已改版过一次；若再次变化，以实际返回为准并更新脚本。
+- 网页 Usage 面板中的「会话/每周额度百分比」目前未通过 API Key 开放，本组件展示的是 Dashboard 的请求数口径。
 
 ## English Quickstart
 
-An iOS lock-screen widget (via the free **Scriptable** app) that shows your [ollama.com](https://ollama.com) cloud usage — session %, weekly %, reset countdowns, and per-model request counts — fetched directly from the same API the official Cloud usage dashboard uses.
+An iOS lock-screen widget (via the free **Scriptable** app) that shows your [ollama.com](https://ollama.com) cloud usage — request counts for the last 24 hours / 7 days / 30 days, plus a 7-day daily bar chart on the home screen — fetched directly from the same API the official Dashboard uses.
 
 1. Install Scriptable from the App Store, create a new script, paste the contents of `OllamaUsage.js`.
 2. Create an API key at [ollama.com/settings/keys](https://ollama.com/settings/keys) and put it in the `API_KEY` constant.
 3. Run the script once in Scriptable to verify data.
 4. Long-press the Lock Screen → Customize → add a Scriptable widget pointing to the script.
-
-If the reset countdown looks wrong for your account, calibrate `SESSION_ANCHOR_ISO` / `SESSION_CYCLE_HOURS` / `WEEKLY_RESET_UTC_HOUR` (see the Chinese section above for how to read your exact reset time from the settings page).
 
 ## License
 
